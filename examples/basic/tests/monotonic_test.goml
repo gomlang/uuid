@@ -1,0 +1,19 @@
+package tests;
+
+use ecosystem::uuid::{MonotonicGenerator, Uuid};
+use std::testing;
+
+#[test]
+fn consumer_can_generate_sortable_ids_with_clock_rollback() -> () {
+    let clock: Ref[i64] = Ref::new(20);
+    let generator = MonotonicGenerator::new(|_| Result::Ok(b"\0\0\0\0\0\0\0\0\0\0"), || clock.get());
+    let first = testing::expect_ok(generator.v7(), "first");
+    clock.set(0);
+    let second = testing::expect_ok(generator.v7(), "rollback");
+    testing::assert(first < second);
+    testing::assert(second.unix_milliseconds() == Option::Some(20));
+    testing::assert_eq(testing::expect_ok(Uuid::parse(second.to_string()), "parse"), second);
+    let secure = MonotonicGenerator::secure();
+    let a = testing::expect_ok(secure.v7(), "secure first");
+    testing::assert(testing::expect_ok(secure.v7(), "secure second") > a);
+}

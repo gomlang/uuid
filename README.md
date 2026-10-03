@@ -51,9 +51,33 @@ The parsers preserve every 128-bit value, including legacy variants, nil, max, a
 
 The v4/v7 layouts follow [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562.html). Tests include its Appendix A.3 and A.6 reference vectors. Generation never falls back to a deterministic PRNG when secure entropy fails.
 
-V7 accepts Unix milliseconds in `0..=281474976710655`. Negative and overflowing timestamps fail before entropy is requested. Each call uses fresh entropy for the remaining 74 bits. Values sort by their timestamp, but calls in the same millisecond have random order; clock rollback is not clamped. There is no shared counter, monotonicity promise, or absolute uniqueness guarantee. Secure generators may be shared between concurrent callers. Injected callbacks must themselves be safe for concurrent use if their generator is shared.
+V7 accepts Unix milliseconds in `0..=281474976710655`. Negative and overflowing timestamps fail before entropy is requested. With `Generator` and `Uuid::new_v7`, each call uses fresh entropy for the remaining 74 bits. Values sort by their timestamp, but calls in the same millisecond have random order; clock rollback is not clamped. There is no shared counter, monotonicity promise, or absolute uniqueness guarantee. Secure generators may be shared between concurrent callers. Injected callbacks must themselves be safe for concurrent use if their generator is shared.
 
 `v4_from_random`, `v7_from_random`, and `Generator::new` trust the caller to supply fresh cryptographically secure entropy when unpredictability matters. Deterministic bytes are useful for test fixtures, not production ID generation. UUIDs are identifiers, not authentication tokens; v7 also exposes creation time.
+
+### Monotonic v7 generation
+
+`MonotonicGenerator::secure()` and `MonotonicGenerator::new(entropy, clock)`
+provide a separate stateful `v7()` API. Copies share one synchronized sequence.
+A newer millisecond timestamp starts from the fresh random 74-bit payload;
+equal or regressing timestamps retain the previous timestamp and increment that
+payload by one, skipping the version and variant bits. This follows the counter
+and rollback choices in [RFC 9562 section 6.2](https://www.rfc-editor.org/rfc/rfc9562.html#section-6.2).
+If all 74 bits are exhausted, `MonotonicError::Exhausted(milliseconds)` is
+returned until the clock advances; the generator never wraps the counter or
+advances the timestamp artificially. Invalid timestamps fail before requesting
+entropy, including negative readings during rollback.
+
+Each call requests and validates 10 fresh entropy bytes, even when the sequence
+uses an increment. `MonotonicError::Source(Error)` preserves source failures.
+Errors and callback panics leave sequence state unchanged. Callbacks execute
+before the sequence lock and may run concurrently, so injected callbacks must
+be safe for shared use. Successful allocations are strictly increasing in lock
+acquisition order; concurrent callers may observe return values in a different
+completion order. The state is local to one generator and is not persisted or
+coordinated across independent generators. Incremented identifiers are
+predictable from their predecessor; use the existing random generator when
+fresh random payloads on every call are required.
 
 The library can parse and preserve every UUID version, but generates only v4 and v7. It does not generate MAC-address, name-based or custom-version UUIDs.
 

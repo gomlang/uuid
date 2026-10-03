@@ -1,0 +1,150 @@
+package tests;
+
+use ecosystem::uuid::{Uuid, MonotonicGenerator, MonotonicError, Error, Variant};
+use std::testing;
+use std::task;
+use std::panic;
+
+fn next_id(generator: MonotonicGenerator) -> Uuid {
+    testing::expect_ok(generator.v7(), "monotonic v7")
+}
+
+#[test]
+fn repeated_and_regressing_clock_samples_increment_without_reordering() -> () {
+    let clock: Ref[i64] = Ref::new(100);
+    let generator = MonotonicGenerator::new(|_| Result::Ok(b"\0\0\0\0\0\0\0\0\0\0"), || clock.get());
+    let alias = generator;
+    let first = next_id(generator);
+    testing::assert_eq(first.to_string(), "00000000-0064-7000-8000-000000000000");
+    testing::assert_eq(next_id(alias).to_string(), "00000000-0064-7000-8000-000000000001");
+    clock.set(99);
+    testing::assert_eq(next_id(generator).to_string(), "00000000-0064-7000-8000-000000000002");
+    clock.set(101);
+    testing::assert_eq(next_id(generator).to_string(), "00000000-0065-7000-8000-000000000000");
+    let independent = MonotonicGenerator::new(|_| Result::Ok(b"\0\0\0\0\0\0\0\0\0\0"), || 100);
+    testing::assert_eq(next_id(independent), first);
+}
+
+#[test]
+fn carries_skip_variant_bits_and_exhaustion_never_wraps_or_advances_time() -> () {
+    let random = b"\x00\x03\x3f\xff\xff\xff\xff\xff\xff\xfe";
+    let generator = MonotonicGenerator::new(|_| Result::Ok(random), || 0);
+    testing::assert_eq(next_id(generator).to_string(), "00000000-0000-7003-bfff-fffffffffffe");
+    testing::assert_eq(next_id(generator).to_string(), "00000000-0000-7003-bfff-ffffffffffff");
+    testing::assert_eq(next_id(generator).to_string(), "00000000-0000-7004-8000-000000000000");
+    let clock: Ref[i64] = Ref::new(0);
+    let maximum = MonotonicGenerator::new(
+        |_| Result::Ok(b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"),
+        || clock.get(),
+    );
+    testing::assert_eq(next_id(maximum).to_string(), "00000000-0000-7fff-bfff-ffffffffffff");
+    for _ in 0..2 {
+        testing::assert_eq(
+            testing::expect_err(maximum.v7(), "full counter"),
+            MonotonicError::Exhausted(0),
+        );
+    }
+    clock.set(1);
+    testing::assert_eq(next_id(maximum).to_string(), "00000000-0001-7fff-bfff-ffffffffffff");
+    clock.set(281474976710655);
+    testing::assert_eq(next_id(maximum).to_string(), "ffffffff-ffff-7fff-bfff-ffffffffffff");
+    testing::assert_eq(
+        testing::expect_err(maximum.v7(), "end timestamp"),
+        MonotonicError::Exhausted(281474976710655),
+    );
+}
+
+#[test]
+fn source_errors_and_panics_do_not_consume_sequence_state() -> () {
+    let clock: Ref[i64] = Ref::new(10);
+    let mode = Ref::new(0);
+    let calls = Ref::new(0);
+    let generator = MonotonicGenerator::new(
+        |_| {
+            calls.set(calls.get() + 1);
+            if mode.get() == 1 {
+                return Result::Err("unavailable")
+            }
+            if mode.get() == 2 {
+                return Result::Ok(b"short")
+            }
+            if mode.get() == 3 {
+                return panic::raise("entropy panic")
+            }
+            Result::Ok(b"\0\0\0\0\0\0\0\0\0\0")
+        },
+        || clock.get(),
+    );
+    let first = next_id(generator);
+    clock.set(-1);
+    testing::assert_eq(
+        testing::expect_err(generator.v7(), "clock"),
+        MonotonicError::Source(Error::InvalidTimestamp(-1)),
+    );
+    testing::assert_eq(calls.get(), 1);
+    clock.set(281474976710656);
+    testing::assert_err(generator.v7());
+    testing::assert_eq(calls.get(), 1);
+    clock.set(11);
+    mode.set(1);
+    testing::assert_eq(
+        testing::expect_err(generator.v7(), "entropy"),
+        MonotonicError::Source(Error::Entropy("unavailable")),
+    );
+    mode.set(2);
+    testing::assert_eq(
+        testing::expect_err(generator.v7(), "bytes"),
+        MonotonicError::Source(Error::InvalidLength { expected: 10, actual: 5 }),
+    );
+    mode.set(3);
+    testing::assert(panic::catch(|| generator.v7()).is_err());
+    mode.set(0);
+    clock.set(10);
+    let next = next_id(generator);
+    testing::assert_eq(next.to_string(), "00000000-000a-7000-8000-000000000001");
+    testing::assert(next > first);
+}
+
+#[test]
+fn concurrent_aliases_assign_one_sequence_with_no_duplicates() -> () {
+    let generator = MonotonicGenerator::new(|_| Result::Ok(b"\0\0\0\0\0\0\0\0\0\0"), || 123);
+    let values: Vec[Uuid] = task::scope(
+        |scope| {
+            let jobs = Vec::new();
+            for _ in 0..8 {
+                jobs.push(
+                    scope.spawn(
+                        |_| {
+                            let values = Vec::new();
+                            let mut previous = Uuid::nil();
+                            for _ in 0..64 {
+                                let value = next_id(generator);
+                                testing::assert(value > previous);
+                                previous = value;
+                                values.push(value);
+                            }
+                            values
+                        },
+                    ),
+                );
+            }
+            let all = Vec::new();
+            for job in jobs {
+                all.extend(job.join());
+            }
+            all
+        },
+    );
+    let seen: HashMap[Uuid, bool] = HashMap::new();
+    for value in values {
+        testing::assert(seen.get(value).is_none());
+        seen.insert(value, true);
+        testing::assert_eq(value.variant(), Variant::Rfc9562);
+        testing::assert(value.version() == Option::Some(7));
+        testing::assert(value.unix_milliseconds() == Option::Some(123));
+        let (high, low) = value.to_u64_pair();
+        testing::assert_eq(high, (123.to_u64() << 16) | 0x7000);
+        testing::assert(low >= 0x8000000000000000 && low < 0x8000000000000200);
+    }
+    testing::assert_eq(seen.len(), 512);
+}

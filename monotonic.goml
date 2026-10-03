@@ -1,0 +1,61 @@
+package uuid;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MonotonicError {
+    Source(Error),
+    Exhausted(i64),
+}
+
+impl ToString for MonotonicError {
+    fn to_string(self: MonotonicError) -> string {
+        match self {
+            Source(error) => error.to_string(),
+            Exhausted(milliseconds) => f"UUID v7 monotonic counter exhausted at {milliseconds} milliseconds",
+        }
+    }
+}
+
+pub struct MonotonicGenerator {
+    source: Generator,
+    gate: Channel[()],
+    previous: Ref[Option[Uuid]],
+}
+
+impl MonotonicGenerator {
+    pub fn new(entropy: isize -> Result[Vec[byte], string], clock: () -> i64) -> MonotonicGenerator {
+        MonotonicGenerator::from_generator(Generator::new(entropy, clock))
+    }
+
+    pub fn secure() -> MonotonicGenerator {
+        MonotonicGenerator::from_generator(Generator::secure())
+    }
+
+    fn from_generator(source: Generator) -> MonotonicGenerator {
+        let gate = Channel::new(1);
+        gate.send(());
+        MonotonicGenerator { source, gate, previous: Ref::new(Option::None) }
+    }
+
+    pub fn v7(self: MonotonicGenerator) -> Result[Uuid, MonotonicError] {
+        let candidate = self.source.v7().map_err(|error| MonotonicError::Source(error))?;
+        let _ = self.gate.recv();
+        defer {
+            self.gate.send(());
+        };
+        let next = if let Some(previous) = self.previous.get() {
+            if candidate.high >> 16 > previous.high >> 16 {
+                candidate
+            } else if previous.low & 0x3fffffffffffffff < 0x3fffffffffffffff {
+                Uuid { low: previous.low + 1, ..previous }
+            } else if previous.high & 0xfff < 0xfff {
+                Uuid { high: previous.high + 1, low: 0x8000000000000000 }
+            } else {
+                return Result::Err(MonotonicError::Exhausted((previous.high >> 16).to_i64()))
+            }
+        } else {
+            candidate
+        };
+        self.previous.set(Option::Some(next));
+        Result::Ok(next)
+    }
+}
