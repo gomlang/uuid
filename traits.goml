@@ -1,0 +1,46 @@
+package uuid;
+
+use std::cmp::{Ord, PartialOrd};
+
+impl Uuid {
+    pub fn cmp(self: Uuid, other: Uuid) -> Ordering {
+        if self.high < other.high || (self.high == other.high && self.low < other.low) {
+            Ordering::Less
+        } else if self.high > other.high || (self.high == other.high && self.low > other.low) {
+            Ordering::Greater
+        } else {
+            Ordering::Equal
+        }
+    }
+}
+
+impl PartialOrd for Uuid {
+    fn partial_cmp(self: Uuid, other: Uuid) -> Option[Ordering] {
+        Option::Some(self.cmp(other))
+    }
+}
+
+impl Ord for Uuid {
+    fn cmp(self: Uuid, other: Uuid) -> Ordering {
+        Uuid::cmp(self, other)
+    }
+}
+
+impl Hash for Uuid {
+    fn hash(self: Uuid) -> u64 {
+        let mut hash: u64 = 14695981039346656037;
+        for index in 0..8 {
+            hash = (hash ^ ((self.high >> ((7 - index) * 8).to_u64()) & 255)) * 1099511628211;
+        }
+        for index in 0..8 {
+            hash = (hash ^ ((self.low >> ((7 - index) * 8).to_u64()) & 255)) * 1099511628211;
+        }
+        hash
+    }
+}
+
+impl Default for Uuid {
+    fn default() -> Uuid {
+        Uuid::nil()
+    }
+}

@@ -1,0 +1,76 @@
+package uuid;
+
+use std::crypto::rand;
+use std::time;
+
+pub struct Generator {
+    entropy: isize -> Result[Vec[byte], string],
+    clock: () -> i64,
+}
+
+impl Generator {
+    pub fn new(entropy: isize -> Result[Vec[byte], string], clock: () -> i64) -> Generator {
+        Generator { entropy, clock }
+    }
+
+    pub fn secure() -> Generator {
+        Generator::new(
+            |length| rand::bytes(length).map(|value| value.to_vec()),
+            || time::SystemTime::now().unix_milliseconds(),
+        )
+    }
+
+    pub fn v4(self: Generator) -> Result[Uuid, Error] {
+        let random = (self.entropy)(16).map_err(|error| Error::Entropy(error))?;
+        Uuid::v4_from_random(random.as_slice())
+    }
+
+    pub fn v7(self: Generator) -> Result[Uuid, Error] {
+        let milliseconds = (self.clock)();
+        check_timestamp(milliseconds)?;
+        let random = (self.entropy)(10).map_err(|error| Error::Entropy(error))?;
+        Uuid::v7_from_random(milliseconds, random.as_slice())
+    }
+}
+
+fn check_timestamp(milliseconds: i64) -> Result[(), Error] {
+    if milliseconds < 0 || milliseconds > 281474976710655 {
+        Result::Err(Error::InvalidTimestamp(milliseconds))
+    } else {
+        Result::Ok(())
+    }
+}
+
+impl Uuid {
+    pub fn new_v4() -> Result[Uuid, Error] {
+        Generator::secure().v4()
+    }
+
+    pub fn new_v7() -> Result[Uuid, Error] {
+        Generator::secure().v7()
+    }
+
+    pub fn v4_from_random(random: Slice[byte]) -> Result[Uuid, Error] {
+        let value = Uuid::from_bytes(random)?;
+        Result::Ok(
+            Uuid {
+                high: (value.high & 0xffffffffffff0fff) | 0x4000,
+                low: (value.low & 0x3fffffffffffffff) | 0x8000000000000000,
+            },
+        )
+    }
+
+    pub fn v7_from_random(milliseconds: i64, random: Slice[byte]) -> Result[Uuid, Error] {
+        check_timestamp(milliseconds)?;
+        if random.len() != 10 {
+            return Result::Err(Error::InvalidLength { expected: 10, actual: random.len() });
+        }
+        let high = (milliseconds.to_u64() << 16) | 0x7000 | ((random[0].to_u64() & 15) << 8)
+            | random[1].to_u64();
+        let mut low = (random[2].to_u64() & 63) | 128;
+        for index in 3..10 {
+            low = (low << 8) | random[index].to_u64();
+        }
+        Result::Ok(Uuid { high, low })
+    }
+}

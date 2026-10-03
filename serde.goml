@@ -1,0 +1,17 @@
+package uuid;
+
+use std::serde::{Serialize, Deserialize, Serializer, Deserializer};
+
+impl Serialize for Uuid {
+    fn serialize[S: Serializer](self: Uuid, serializer: S) -> Result[(), string] {
+        serializer.serialize_string(self.hyphenated())
+    }
+}
+
+impl Deserialize for Uuid {
+    fn deserialize[D: Deserializer](deserializer: D) -> Result[Uuid, string] {
+        Uuid::parse(deserializer.deserialize_string()?).map_err(
+            |error| deserializer.error(error.to_string()),
+        )
+    }
+}

@@ -1,0 +1,33 @@
+package main;
+
+use ecosystem::uuid::{Uuid};
+use std::serde::{Serialize, Deserialize};
+use std::json;
+use std::testing;
+
+#[derive(Serialize, Deserialize)]
+pub struct Event {
+    pub id: Uuid,
+    pub action: string,
+}
+
+pub fn exercise() -> () {
+    let event = Event {
+        id: testing::expect_ok(Uuid::new_v7(), "event ID"),
+        action: "account.created",
+    };
+    let encoded = testing::expect_ok(json::try_to_string(event), "event JSON");
+    let decoded: Event = testing::expect_ok(json::from_string(encoded), "stored event");
+    testing::assert_eq(decoded.id, event.id);
+    testing::assert_eq(decoded.action, "account.created");
+    let events: HashMap[Uuid, string] = HashMap::new();
+    events.insert(decoded.id, decoded.action);
+    testing::assert((events.get(event.id)) == (Option::Some("account.created")));
+    testing::assert((event.id.version()) == (Option::Some(7)));
+    testing::assert_some(event.id.unix_milliseconds());
+}
+
+fn main() -> () {
+    exercise();
+    println("uuid consumer: typed JSON event storage and UUID map keys ok");
+}

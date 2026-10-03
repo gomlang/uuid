@@ -1,0 +1,105 @@
+package uuid;
+
+use std::bytes;
+use std::encoding::hex;
+
+fn nibble(input: string, index: isize) -> Result[u64, Error] {
+    let value = input.byte_get(index);
+    if value >= b'0' && value <= b'9' {
+        Result::Ok((value - b'0').to_u64())
+    } else if value >= b'a' && value <= b'f' {
+        Result::Ok((value - b'a' + 10).to_u64())
+    } else if value >= b'A' && value <= b'F' {
+        Result::Ok((value - b'A' + 10).to_u64())
+    } else {
+        Result::Err(Error::InvalidHex(index))
+    }
+}
+
+fn parse_text(input: string, start: isize, hyphens: bool) -> Result[Uuid, Error] {
+    let width = if hyphens {
+        36
+    } else {
+        32
+    };
+    if input.byte_len() != start + width {
+        return Result::Err(
+            Error::InvalidLength { expected: start + width, actual: input.byte_len() },
+        );
+    }
+    let mut high: u64 = 0;
+    let mut low: u64 = 0;
+    let mut digits = 0;
+    for offset in 0..width {
+        let index = start + offset;
+        if hyphens && (offset == 8 || offset == 13 || offset == 18 || offset == 23) {
+            if input.byte_get(index) != b'-' {
+                return Result::Err(Error::InvalidSeparator(index));
+            }
+        } else {
+            let value = nibble(input, index)?;
+            if digits < 16 {
+                high = (high << 4) | value;
+            } else {
+                low = (low << 4) | value;
+            }
+            digits += 1;
+        }
+    }
+    Result::Ok(Uuid { high, low })
+}
+
+impl Uuid {
+    pub fn parse(input: string) -> Result[Uuid, Error] {
+        parse_text(input, 0, true)
+    }
+
+    pub fn parse_simple(input: string) -> Result[Uuid, Error] {
+        parse_text(input, 0, false)
+    }
+
+    pub fn parse_urn(input: string) -> Result[Uuid, Error] {
+        if input.byte_len() != 45 {
+            return Result::Err(Error::InvalidLength { expected: 45, actual: input.byte_len() });
+        }
+        let prefix = "urn:uuid:";
+        for index in 0..9 {
+            let actual = input.byte_get(index);
+            let expected = prefix.byte_get(index);
+            if actual != expected
+                && (expected < b'a' || expected > b'z' || (actual | 32) != expected) {
+                return Result::Err(Error::InvalidUrnPrefix);
+            }
+        }
+        parse_text(input, 9, true)
+    }
+
+    pub fn simple(self: Uuid) -> string {
+        hex::encode(bytes::Bytes::from_vec(self.to_bytes()))
+    }
+
+    pub fn hyphenated(self: Uuid) -> string {
+        let value = self.simple();
+        value.byte_slice(0, 8) + "-" + value.byte_slice(8, 12) + "-" + value.byte_slice(12, 16)
+            + "-"
+            + value.byte_slice(16, 20)
+            + "-"
+            + value.byte_slice(20, 32)
+    }
+
+    pub fn urn(self: Uuid) -> string {
+        "urn:uuid:" + self.hyphenated()
+    }
+}
+
+impl ToString for Uuid {
+    fn to_string(self: Uuid) -> string {
+        self.hyphenated()
+    }
+}
+
+impl Debug for Uuid {
+    fn debug(self: Uuid) -> string {
+        "Uuid(" + self.hyphenated() + ")"
+    }
+}

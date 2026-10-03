@@ -1,0 +1,119 @@
+package uuid;
+
+#[derive(PartialEq, Eq)]
+pub struct Uuid {
+    high: u64,
+    low: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Variant {
+    Ncs,
+    Rfc9562,
+    Microsoft,
+    Future,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Error {
+    InvalidLength {
+        expected: isize,
+        actual: isize,
+    },
+    InvalidHex(isize),
+    InvalidSeparator(isize),
+    InvalidUrnPrefix,
+    InvalidTimestamp(i64),
+    Entropy(string),
+}
+
+impl ToString for Error {
+    fn to_string(self: Error) -> string {
+        match self {
+            InvalidLength { expected, actual } => f"UUID requires {expected} bytes, received {actual}",
+            InvalidHex(index) => f"invalid UUID hexadecimal digit at byte {index}",
+            InvalidSeparator(index) => f"expected UUID hyphen at byte {index}",
+            InvalidUrnPrefix => "expected urn:uuid: prefix",
+            InvalidTimestamp(value) => f"UUID v7 timestamp must be between 0 and 281474976710655 milliseconds: {value}",
+            Entropy(message) => "UUID entropy source: " + message,
+        }
+    }
+}
+
+impl Uuid {
+    pub fn nil() -> Uuid {
+        Uuid { high: 0, low: 0 }
+    }
+
+    pub fn max() -> Uuid {
+        Uuid { high: 0xffffffffffffffff, low: 0xffffffffffffffff }
+    }
+
+    pub fn from_u64_pair(high: u64, low: u64) -> Uuid {
+        Uuid { high, low }
+    }
+
+    pub fn to_u64_pair(self: Uuid) -> (u64, u64) {
+        (self.high, self.low)
+    }
+
+    pub fn from_bytes(input: Slice[byte]) -> Result[Uuid, Error] {
+        if input.len() != 16 {
+            return Result::Err(Error::InvalidLength { expected: 16, actual: input.len() });
+        }
+        let mut high: u64 = 0;
+        let mut low: u64 = 0;
+        for index in 0..8 {
+            high = (high << 8) | input[index].to_u64();
+            low = (low << 8) | input[index + 8].to_u64();
+        }
+        Result::Ok(Uuid { high, low })
+    }
+
+    pub fn to_bytes(self: Uuid) -> Vec[byte] {
+        let output: Vec[byte] = Vec::with_capacity(16);
+        for index in 0..8 {
+            output.push((self.high >> ((7 - index) * 8).to_u64()).to_u8());
+        }
+        for index in 0..8 {
+            output.push((self.low >> ((7 - index) * 8).to_u64()).to_u8());
+        }
+        output
+    }
+
+    pub fn is_nil(self: Uuid) -> bool {
+        self.high == 0 && self.low == 0
+    }
+
+    pub fn is_max(self: Uuid) -> bool {
+        self.high == 0xffffffffffffffff && self.low == 0xffffffffffffffff
+    }
+
+    pub fn variant(self: Uuid) -> Variant {
+        if self.low & 0x8000000000000000 == 0 {
+            Variant::Ncs
+        } else if self.low & 0x4000000000000000 == 0 {
+            Variant::Rfc9562
+        } else if self.low & 0x2000000000000000 == 0 {
+            Variant::Microsoft
+        } else {
+            Variant::Future
+        }
+    }
+
+    pub fn version(self: Uuid) -> Option[byte] {
+        if self.variant() == Variant::Rfc9562 {
+            Option::Some(((self.high >> 12) & 15).to_u8())
+        } else {
+            Option::None
+        }
+    }
+
+    pub fn unix_milliseconds(self: Uuid) -> Option[i64] {
+        if self.version() == Option::Some(7) {
+            Option::Some((self.high >> 16).to_i64())
+        } else {
+            Option::None
+        }
+    }
+}
