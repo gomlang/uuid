@@ -1,0 +1,52 @@
+package tests;
+
+use ecosystem::uuid::{Uuid, Error};
+use std::testing;
+
+#[test]
+fn guid_mixed_endian_fields_match_known_vector() -> () {
+    let id = parse("00112233-4455-6677-8899-aabbccddeeff");
+    let guid = octets("33221100554477668899aabbccddeeff");
+    testing::assert(id.to_guid_bytes() == guid);
+    testing::assert_eq(testing::expect_ok(Uuid::from_guid_bytes(guid.as_slice()), "GUID"), id);
+    testing::assert(id.to_bytes() == octets("00112233445566778899aabbccddeeff"));
+    testing::assert_eq(id.to_string(), "00112233-4455-6677-8899-aabbccddeeff");
+}
+
+#[test]
+fn guid_conversion_preserves_every_bit_and_owns_storage() -> () {
+    for bit in 0..128 {
+        let input = Uuid::nil().to_bytes();
+        input[bit / 8] = (1.to_u64() << (bit % 8).to_u64()).to_u8();
+        let id = testing::expect_ok(Uuid::from_guid_bytes(input.as_slice()), "one bit");
+        testing::assert(id.to_guid_bytes() == input);
+        input[bit / 8] = 0;
+        testing::assert(!id.is_nil());
+        let output = id.to_guid_bytes();
+        output[bit / 8] = 0;
+        testing::assert(!id.is_nil());
+        testing::assert(id.to_guid_bytes() != output);
+    }
+    for id in[Uuid::nil(), Uuid::max()] {
+        testing::assert_eq(
+            testing::expect_ok(Uuid::from_guid_bytes(id.to_guid_bytes().as_slice()), "special"),
+            id,
+        );
+    }
+}
+
+#[test]
+fn guid_conversion_rejects_all_wrong_lengths() -> () {
+    for length in 0..33 {
+        if length != 16 {
+            let input: Vec[byte] = Vec::new();
+            for _ in 0..length {
+                input.push(0);
+            }
+            testing::assert_eq(
+                testing::expect_err(Uuid::from_guid_bytes(input.as_slice()), "length"),
+                Error::InvalidLength { expected: 16, actual: length },
+            );
+        }
+    }
+}

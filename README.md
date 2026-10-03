@@ -29,6 +29,7 @@ fn event_id() -> Result[string, string] {
 | `Uuid::parse_urn(text)` | Exactly `urn:uuid:` followed by the hyphenated form. Scheme and namespace are case insensitive. |
 | `to_string()`, `hyphenated()`, `simple()`, `urn()` | Canonical lowercase output. |
 | `Uuid::from_bytes(slice)`, `to_bytes()` | Exactly 16 bytes in network byte order; bytes are copied, never retained as a mutable alias. |
+| `Uuid::from_guid_bytes(slice)`, `to_guid_bytes()` | Microsoft GUID byte layout: the first 4-, 2-, and 2-byte fields use little-endian order; the final eight bytes retain their order. Exactly 16 bytes, with independent storage. |
 | `Uuid::from_u64_pair(high, low)`, `to_u64_pair()` | Two big-endian halves without version or variant rewriting. |
 | `Uuid::nil()`, `Uuid::max()`, `is_nil()`, `is_max()` | All-zero and all-one special UUID values. `Default` is nil. |
 | `variant()` | `Ncs`, `Rfc9562`, `Microsoft` or `Future`. |
@@ -54,7 +55,15 @@ V7 accepts Unix milliseconds in `0..=281474976710655`. Negative and overflowing 
 
 `v4_from_random`, `v7_from_random`, and `Generator::new` trust the caller to supply fresh cryptographically secure entropy when unpredictability matters. Deterministic bytes are useful for test fixtures, not production ID generation. UUIDs are identifiers, not authentication tokens; v7 also exposes creation time.
 
-The library can parse and preserve every UUID version, but generates only v4 and v7. It does not generate MAC-address, name-based or custom-version UUIDs, or convert Microsoft's mixed-endian GUID memory layout.
+The library can parse and preserve every UUID version, but generates only v4 and v7. It does not generate MAC-address, name-based or custom-version UUIDs.
+
+The explicit GUID methods interoperate with the byte layout returned by
+[.NET `Guid.ToByteArray()`](https://learn.microsoft.com/en-us/dotnet/api/system.guid.tobytearray).
+For example, `00112233-4455-6677-8899-aabbccddeeff` becomes
+`33 22 11 00 55 44 77 66 88 99 aa bb cc dd ee ff`. This is a field-wise conversion,
+not reversal of the entire UUID. It preserves every bit without checking or
+rewriting the variant/version. Canonical text, Serde and `to_bytes()` keep their
+existing network-order representation.
 
 ## Checks
 

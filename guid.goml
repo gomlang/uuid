@@ -1,0 +1,29 @@
+package uuid;
+
+fn swap_guid_fields(data: Vec[byte]) -> () {
+    for (left, right) in[(0, 3), (1, 2), (4, 5), (6, 7)] {
+        let saved = data[left];
+        data[left] = data[right];
+        data[right] = saved;
+    }
+}
+
+impl Uuid {
+    pub fn from_guid_bytes(input: Slice[byte]) -> Result[Uuid, Error] {
+        if input.len() != 16 {
+            return Result::Err(Error::InvalidLength { expected: 16, actual: input.len() });
+        }
+        let data = Vec::new();
+        for value in input {
+            data.push(value);
+        }
+        swap_guid_fields(data);
+        Uuid::from_bytes(data.as_slice())
+    }
+
+    pub fn to_guid_bytes(self: Uuid) -> Vec[byte] {
+        let data = self.to_bytes();
+        swap_guid_fields(data);
+        data
+    }
+}
