@@ -1,0 +1,59 @@
+package tests;
+
+use ecosystem::uuid::examples::basic as application;
+use ecosystem::uuid::{Uuid, Generator, Variant};
+use std::testing;
+use std::task;
+use std::time;
+
+#[test]
+fn typed_application_events() -> () {
+    application::exercise();
+}
+
+#[test]
+fn secure_generator_is_usable_from_parallel_consumers() -> () {
+    let generator = Generator::secure();
+    let before = time::SystemTime::now().unix_milliseconds();
+    let generated: Vec[Uuid] = task::scope(
+        |scope| {
+            let jobs = Vec::new();
+            for _ in 0..8 {
+                jobs.push(
+                    scope.spawn(
+                        |_| {
+                            let values: Vec[Uuid] = Vec::new();
+                            for _ in 0..32 {
+                                values.push(testing::expect_ok(generator.v4(), "secure v4"));
+                                values.push(testing::expect_ok(generator.v7(), "secure v7"));
+                            }
+                            values
+                        },
+                    ),
+                );
+            }
+            let all = Vec::new();
+            for job in jobs {
+                for value in job.join() {
+                    all.push(value);
+                }
+            }
+            all
+        },
+    );
+    let after = time::SystemTime::now().unix_milliseconds();
+    let seen: HashMap[Uuid, bool] = HashMap::new();
+    for value in generated {
+        testing::assert_none(seen.get(value));
+        seen.insert(value, true);
+        testing::assert_eq(value.variant(), Variant::Rfc9562);
+        match value.unix_milliseconds() {
+            Some(stamp) => testing::assert(stamp >= before && stamp <= after),
+            None => testing::assert((value.version()) == (Option::Some(4))),
+        }
+    }
+    testing::assert_eq(seen.len(), 512);
+    testing::assert(
+        (testing::expect_ok(Uuid::new_v4(), "default v4").version()) == (Option::Some(4)),
+    );
+}

@@ -1,0 +1,309 @@
+package tests;
+
+use ecosystem::uuid::{Uuid, Variant, Error, Generator};
+use std::testing;
+use std::encoding::hex;
+use std::json;
+use std::bincode;
+use std::cmp::{Ord, PartialOrd};
+
+fn octets(input: string) -> Vec[byte] {
+    testing::expect_ok(hex::decode(input), "hexadecimal fixture").to_vec()
+}
+
+fn parse(input: string) -> Uuid {
+    testing::expect_ok(Uuid::parse(input), "UUID fixture")
+}
+
+#[test]
+fn rfc9562_representation_vectors() -> () {
+    let value = parse("f81d4fae-7dec-11d0-a765-00a0c91e6bf6");
+    testing::assert((value.to_u64_pair()) == ((0xf81d4fae7dec11d0, 0xa76500a0c91e6bf6)));
+    testing::assert((value.to_bytes()) == (octets("f81d4fae7dec11d0a76500a0c91e6bf6")));
+    testing::assert_eq(value.to_string(), "f81d4fae-7dec-11d0-a765-00a0c91e6bf6");
+    testing::assert_eq(value.simple(), "f81d4fae7dec11d0a76500a0c91e6bf6");
+    testing::assert_eq(value.urn(), "urn:uuid:f81d4fae-7dec-11d0-a765-00a0c91e6bf6");
+    testing::assert_eq(parse("F81D4fAE-7DeC-11D0-A765-00a0C91E6bF6"), value);
+    testing::assert_eq(
+        testing::expect_ok(Uuid::parse_simple("F81D4FAE7DEC11D0A76500A0C91E6BF6"), "simple"),
+        value,
+    );
+    testing::assert_eq(
+        testing::expect_ok(Uuid::parse_urn("URN:UUID:F81D4FAE-7DEC-11D0-A765-00A0C91E6BF6"), "URN"),
+        value,
+    );
+    testing::assert_eq(value.variant(), Variant::Rfc9562);
+    testing::assert((value.version()) == (Option::Some(1)));
+    testing::assert_none(value.unix_milliseconds());
+}
+
+#[test]
+fn rfc9562_v4_vector_and_bit_overwrite() -> () {
+    let entropy = octets("919108F752D133205BACF847DB4148A8");
+    let value = testing::expect_ok(Uuid::v4_from_random(entropy.as_slice()), "v4 reference");
+    testing::assert_eq(value.to_string(), "919108f7-52d1-4320-9bac-f847db4148a8");
+    testing::assert((value.version()) == (Option::Some(4)));
+    testing::assert_eq(value.variant(), Variant::Rfc9562);
+    testing::assert_none(value.unix_milliseconds());
+    let all = octets("ffffffffffffffffffffffffffffffff");
+    testing::assert_eq(
+        testing::expect_ok(Uuid::v4_from_random(all.as_slice()), "all bits").to_string(),
+        "ffffffff-ffff-4fff-bfff-ffffffffffff",
+    );
+    let zero = Uuid::nil().to_bytes();
+    testing::assert_eq(
+        testing::expect_ok(Uuid::v4_from_random(zero.as_slice()), "zero bits").to_string(),
+        "00000000-0000-4000-8000-000000000000",
+    );
+    testing::assert((entropy) == (octets("919108F752D133205BACF847DB4148A8")));
+}
+
+#[test]
+fn rfc9562_v7_vector_and_timestamp_boundaries() -> () {
+    let entropy = octets("0cc318c4dc0c0c07398f");
+    let value = testing::expect_ok(
+        Uuid::v7_from_random(1645557742000, entropy.as_slice()),
+        "v7 reference",
+    );
+    testing::assert_eq(value.to_string(), "017f22e2-79b0-7cc3-98c4-dc0c0c07398f");
+    testing::assert((value.unix_milliseconds()) == (Option::Some(1645557742000)));
+    testing::assert((value.version()) == (Option::Some(7)));
+    testing::assert_eq(value.variant(), Variant::Rfc9562);
+    let zeros = octets("00000000000000000000");
+    let ones = octets("ffffffffffffffffffff");
+    let epoch = testing::expect_ok(Uuid::v7_from_random(0, zeros.as_slice()), "epoch");
+    let last = testing::expect_ok(
+        Uuid::v7_from_random(281474976710655, ones.as_slice()),
+        "last timestamp",
+    );
+    testing::assert_eq(epoch.to_string(), "00000000-0000-7000-8000-000000000000");
+    testing::assert_eq(last.to_string(), "ffffffff-ffff-7fff-bfff-ffffffffffff");
+    testing::assert((last.unix_milliseconds()) == (Option::Some(281474976710655)));
+    testing::assert_eq(
+        testing::expect_err(Uuid::v7_from_random(-1, zeros.as_slice()), "negative"),
+        Error::InvalidTimestamp(-1),
+    );
+    testing::assert_eq(
+        testing::expect_err(Uuid::v7_from_random(281474976710656, zeros.as_slice()), "overflow"),
+        Error::InvalidTimestamp(281474976710656),
+    );
+    testing::assert_err(Uuid::v7_from_random(9223372036854775807, zeros.as_slice()));
+    let earlier = testing::expect_ok(Uuid::v7_from_random(65535, ones.as_slice()), "earlier");
+    let later = testing::expect_ok(Uuid::v7_from_random(65536, zeros.as_slice()), "later");
+    testing::assert((earlier.cmp(later)) == (Ordering::Less));
+}
+
+#[test]
+fn strict_parsers_reject_alternative_or_malformed_inputs() -> () {
+    let valid = "00112233-4455-6677-8899-aabbccddeeff";
+    for invalid in Vec::from_array(
+        [
+            "",
+            "00112233445566778899aabbccddeeff",
+            "{00112233-4455-6677-8899-aabbccddeeff}",
+            "urn:uuid:00112233-4455-6677-8899-aabbccddeeff",
+            " 00112233-4455-6677-8899-aabbccddeeff",
+            "00112233-4455-6677-8899-aabbccddeeff ",
+            "00112233-4455-6677-8899-aabbccddeef",
+            "00112233-4455-6677-8899-aabbccddeeff0",
+        ],
+    ) {
+        testing::assert_err(Uuid::parse(invalid));
+    }
+    for index in 0..36 {
+        let replacement = valid.byte_slice(0, index) + "z" + valid.byte_slice(index + 1, 36);
+        let error = testing::expect_err(Uuid::parse(replacement), "bad position");
+        if index == 8 || index == 13 || index == 18 || index == 23 {
+            testing::assert_eq(error, Error::InvalidSeparator(index));
+        } else {
+            testing::assert_eq(error, Error::InvalidHex(index));
+        }
+    }
+    testing::assert_err(Uuid::parse("00112233-4455-6677-8899-aabbccddeé"));
+    testing::assert_err(Uuid::parse("00112233-4455-6677-8899-aabbccddee\u0000f"));
+    testing::assert_err(Uuid::parse_simple(valid));
+    testing::assert_err(Uuid::parse_simple("00112233445566778899aabbccddeefg"));
+    testing::assert_eq(
+        testing::expect_err(
+            Uuid::parse_urn("urn:uuie:00112233-4455-6677-8899-aabbccddeeff"),
+            "prefix",
+        ),
+        Error::InvalidUrnPrefix,
+    );
+    testing::assert_err(Uuid::parse_urn("urn:uuid:00112233-4455-6677-8899-aabbccddeeff#"));
+    testing::assert_err(Uuid::parse_urn(valid));
+    testing::assert_err(Uuid::parse_urn("urn\u001auuid:00112233-4455-6677-8899-aabbccddeeff"));
+    testing::assert_err(Uuid::parse_urn("urn:uuid\u001a00112233-4455-6677-8899-aabbccddeeff"));
+}
+
+#[test]
+fn nil_max_variants_and_future_versions_preserve_all_bits() -> () {
+    testing::assert(Uuid::nil().is_nil());
+    testing::assert(!Uuid::nil().is_max());
+    testing::assert(Uuid::max().is_max());
+    testing::assert(!Uuid::max().is_nil());
+    testing::assert_eq(Uuid::nil().to_string(), "00000000-0000-0000-0000-000000000000");
+    testing::assert_eq(Uuid::max().to_string(), "ffffffff-ffff-ffff-ffff-ffffffffffff");
+    testing::assert_eq(Uuid::nil().variant(), Variant::Ncs);
+    testing::assert_eq(Uuid::max().variant(), Variant::Future);
+    testing::assert_none(Uuid::nil().version());
+    testing::assert_none(Uuid::max().version());
+    testing::assert_eq(Uuid::from_u64_pair(0, 0xc000000000000000).variant(), Variant::Microsoft);
+    testing::assert_eq(Uuid::from_u64_pair(0, 0x7fffffffffffffff).variant(), Variant::Ncs);
+    testing::assert_eq(Uuid::from_u64_pair(0, 0xbfffffffffffffff).variant(), Variant::Rfc9562);
+    testing::assert_eq(Uuid::from_u64_pair(0, 0xdfffffffffffffff).variant(), Variant::Microsoft);
+    testing::assert_eq(Uuid::from_u64_pair(0, 0xe000000000000000).variant(), Variant::Future);
+    testing::assert((parse("00000000-0000-f000-8000-000000000000").version()) == (Option::Some(15)));
+    let default: Uuid = Default::default();
+    testing::assert(default.is_nil());
+}
+
+#[test]
+fn byte_storage_is_immutable_and_exact_length() -> () {
+    let input = octets("00112233445566778899aabbccddeeff");
+    let value = testing::expect_ok(Uuid::from_bytes(input.as_slice()), "bytes");
+    input.set(0, 255);
+    let output = value.to_bytes();
+    output.set(15, 0);
+    testing::assert_eq(value.to_string(), "00112233-4455-6677-8899-aabbccddeeff");
+    testing::assert((value.to_u64_pair()) == ((0x0011223344556677, 0x8899aabbccddeeff)));
+    for length in 0..20 {
+        let data: Vec[byte] = Vec::new();
+        for _ in 0..length {
+            data.push(0);
+        }
+        if length != 16 {
+            testing::assert_eq(
+                testing::expect_err(Uuid::from_bytes(data.as_slice()), "byte count"),
+                Error::InvalidLength { expected: 16, actual: length },
+            );
+            testing::assert_err(Uuid::v4_from_random(data.as_slice()));
+        }
+        if length != 10 {
+            testing::assert_eq(
+                testing::expect_err(Uuid::v7_from_random(0, data.as_slice()), "v7 byte count"),
+                Error::InvalidLength { expected: 10, actual: length },
+            );
+        }
+    }
+}
+
+#[test]
+fn ordering_and_hash_support_map_keys() -> () {
+    let values = Vec::from_array(
+        [
+            Uuid::nil(),
+            Uuid::from_u64_pair(0, 0x8000000000000000),
+            Uuid::from_u64_pair(0, 0xffffffffffffffff),
+            Uuid::from_u64_pair(1, 0),
+            Uuid::from_u64_pair(0x8000000000000000, 0),
+            Uuid::max(),
+        ],
+    );
+    let map: HashMap[Uuid, isize] = HashMap::new();
+    for index in 0..values.len() {
+        map.insert(values[index], index);
+        testing::assert((values[index].cmp(values[index])) == (Ordering::Equal));
+        testing::assert(
+            (values[index].partial_cmp(values[index])) == (Option::Some(Ordering::Equal)),
+        );
+        if index > 0 {
+            testing::assert((Ord::cmp(values[index - 1], values[index])) == (Ordering::Less));
+            testing::assert((values[index].cmp(values[index - 1])) == (Ordering::Greater));
+        }
+    }
+    for index in 0..values.len() {
+        let copy = parse(values[index].to_string());
+        testing::assert_eq(copy.hash(), values[index].hash());
+        testing::assert((map.get(copy)) == (Option::Some(index)));
+    }
+}
+
+#[test]
+fn serde_uses_canonical_strings_and_rejects_bad_values() -> () {
+    let value = parse("017f22e2-79b0-7cc3-98c4-dc0c0c07398f");
+    testing::assert_eq(
+        testing::expect_ok(json::try_to_string(value), "encode"),
+        "\"017f22e2-79b0-7cc3-98c4-dc0c0c07398f\"",
+    );
+    let uppercase: Uuid = testing::expect_ok(
+        json::from_string("\"017F22E2-79B0-7CC3-98C4-DC0C0C07398F\""),
+        "uppercase JSON",
+    );
+    testing::assert_eq(uppercase, value);
+    for input in Vec::from_array(
+        [
+            "null",
+            "17",
+            "[]",
+            "{}",
+            "\"\"",
+            "\"017f22e279b07cc398c4dc0c0c07398f\"",
+            "\"017f22e2-79b0-7cc3-98c4-dc0c0c07398g\"",
+        ],
+    ) {
+        let result: Result[Uuid, string] = json::from_string(input);
+        testing::assert_err(result);
+    }
+    let data = testing::expect_ok(bincode::encode_to_vec(value, bincode::standard()), "binary");
+    let restored: (Uuid, isize) = testing::expect_ok(
+        bincode::decode_from_slice(data.as_slice(), bincode::standard()),
+        "decode binary",
+    );
+    testing::assert_eq(restored.0, value);
+    testing::assert_eq(restored.1, data.len());
+}
+
+#[test]
+fn injectable_generator_propagates_failures_and_checks_sources() -> () {
+    let requested = Ref::new(0);
+    let generator = Generator::new(
+        |length| {
+            requested.set(length);
+            Result::Ok(octets("919108F752D133205BACF847DB4148A8"))
+        },
+        || 1645557742000,
+    );
+    testing::assert_eq(
+        testing::expect_ok(generator.v4(), "injected v4").to_string(),
+        "919108f7-52d1-4320-9bac-f847db4148a8",
+    );
+    testing::assert_eq(requested.get(), 16);
+    let v7 = Generator::new(
+        |length| {
+            requested.set(length);
+            Result::Ok(octets("0cc318c4dc0c0c07398f"))
+        },
+        || 1645557742000,
+    );
+    testing::assert_eq(
+        testing::expect_ok(v7.v7(), "injected v7").to_string(),
+        "017f22e2-79b0-7cc3-98c4-dc0c0c07398f",
+    );
+    testing::assert_eq(requested.get(), 10);
+    let failed = Generator::new(|_| Result::Err("unavailable"), || 0);
+    testing::assert_eq(
+        testing::expect_err(failed.v4(), "v4 failure"),
+        Error::Entropy("unavailable"),
+    );
+    testing::assert_eq(
+        testing::expect_err(failed.v7(), "v7 failure"),
+        Error::Entropy("unavailable"),
+    );
+    let short = Generator::new(|_| Result::Ok(Vec::new()), || 0);
+    testing::assert_err(short.v4());
+    testing::assert_err(short.v7());
+    requested.set(0);
+    let invalid = Generator::new(
+        |length| {
+            requested.set(length);
+            Result::Ok(Vec::new())
+        },
+        || -1,
+    );
+    testing::assert_eq(
+        testing::expect_err(invalid.v7(), "clock failure"),
+        Error::InvalidTimestamp(-1),
+    );
+    testing::assert_eq(requested.get(), 0);
+}
