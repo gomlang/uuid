@@ -1,15 +1,15 @@
 # uuid
 
-UUID values and secure UUID v4/v7 generation for GoML. Requires GoML 0.1.57 or newer.
+UUID values and secure UUID v4/v7 generation for GoML. Requires a current GoML toolchain supporting unversioned registry dependencies; see [the pinned ecosystem toolchain](https://github.com/gomlang/verification/blob/main/ci/toolchain.json).
 
 The implementation uses two private `u64` fields and pure GoML parsing, formatting, ordering, hashing and bit layout. Secure entropy comes from `std::crypto::rand`; wall-clock time comes from `std::time`. There are no ecosystem or native binding dependencies.
 
 ```toml
 [dependencies]
-"ecosystem::uuid" = "0.1.0"
+"ecosystem::uuid" = true
 ```
 
-The dependency version is the version used by the ecosystem verification registry. This repository does not imply an immutable registry release has been published.
+`true` selects the unversioned registry entry, which follows the repository default branch. The ecosystem verifier uses an isolated snapshot of the local checkout.
 
 ```goml
 use ecosystem::uuid::{Uuid};
