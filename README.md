@@ -1,6 +1,6 @@
 # uuid
 
-UUID values and secure UUID v4/v7 generation for GoML. Requires a current GoML toolchain supporting unversioned registry dependencies; see [the pinned ecosystem toolchain](https://github.com/gomlang/verification/blob/main/ci/toolchain.json).
+UUID values and secure UUID v4/v7 generation for GoML. Requires a current GoML toolchain supporting unversioned registry dependencies; see [the pinned ecosystem toolchain](https://github.com/gomlang/workflows/blob/main/ci/toolchain.json).
 
 The implementation uses two private `u64` fields and pure GoML parsing, formatting, ordering, hashing and bit layout. Secure entropy comes from `std::crypto::rand`; wall-clock time comes from `std::time`. There are no ecosystem or native binding dependencies.
 
