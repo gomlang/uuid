@@ -79,7 +79,7 @@ coordinated across independent generators. Incremented identifiers are
 predictable from their predecessor; use the existing random generator when
 fresh random payloads on every call are required.
 
-The library can parse and preserve every UUID version, but generates only v4 and v7. It does not generate MAC-address, name-based or custom-version UUIDs.
+The library can parse and preserve every UUID version, but generates v4, v5 and v7. It does not generate MAC-address or custom-version UUIDs.
 
 The explicit GUID methods interoperate with the byte layout returned by
 [.NET `Guid.ToByteArray()`](https://learn.microsoft.com/en-us/dotnet/api/system.guid.tobytearray).
@@ -100,3 +100,12 @@ goml run --example basic
 ```
 
 `examples/basic` is a separate consumer package that uses only public API. It stores typed JSON events with UUID keys; its tests share a secure generator across eight tasks. The root tests cover RFC vectors, every malformed digit/separator position, entropy failures, timestamp limits, variant boundaries, byte alias isolation, order, hashing and Serde rejection.
+
+`Uuid::v5(namespace, name: Slice[byte])` generates deterministic RFC 9562 name-based
+UUIDs using SHA-1. Standard namespaces are `namespace_dns/url/oid/x500()`. Names
+are exact bytes: no implicit Unicode normalization, case folding or DNS parsing.
+Nil and arbitrary namespace UUIDs are valid. The implementation streams name
+bytes through fixed-size SHA-1 blocks and does not copy the full name. SHA-1 is
+used solely for UUID v5 compatibility; these identifiers are not authentication
+tokens or collision-resistant content hashes. Reference tests cover all standard
+namespaces, nil, binary names and padding/block boundaries against Python hashlib.
