@@ -4,6 +4,10 @@ use std::cmp::{Ord, PartialOrd};
 
 impl Uuid {
     pub fn cmp(self: Uuid, other: Uuid) -> Ordering {
+        self.compare_value(other)
+    }
+
+    fn compare_value(self: Uuid, other: Uuid) -> Ordering {
         if self.high < other.high || (self.high == other.high && self.low < other.low) {
             Ordering::Less
         } else if self.high > other.high || (self.high == other.high && self.low > other.low) {
@@ -22,7 +26,7 @@ impl PartialOrd for Uuid {
 
 impl Ord for Uuid {
     fn cmp(self: Uuid, other: Uuid) -> Ordering {
-        Uuid::cmp(self, other)
+        self.compare_value(other)
     }
 }
 
